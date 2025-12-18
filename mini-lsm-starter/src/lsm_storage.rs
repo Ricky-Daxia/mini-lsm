@@ -398,7 +398,7 @@ impl LsmStorageInner {
                 .imm_memtables
                 .clone()
                 .into_iter()
-                .map(|table| Box::new(table.scan(lower.clone(), upper.clone()))),
+                .map(|table| Box::new(table.scan(lower, upper))),
         );
         let mut iter = LsmIterator::new(MergeIterator::create(iters))?;
         while !iter.key().is_empty() && iter.value().is_empty() {

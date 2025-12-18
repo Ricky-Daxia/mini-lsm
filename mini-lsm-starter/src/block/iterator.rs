@@ -17,9 +17,13 @@
 
 use std::sync::Arc;
 
+use bytes::{Buf, Bytes};
+
 use crate::key::{KeySlice, KeyVec};
 
 use super::Block;
+
+const KEY_VAL_LEN: usize = 4; // 2 bytes for key length and 2 bytes for value length
 
 /// Iterates on a block.
 pub struct BlockIterator {
@@ -35,57 +39,130 @@ pub struct BlockIterator {
     first_key: KeyVec,
 }
 
+impl Block {
+    fn get_first_key(&self) -> KeyVec {
+        let mut buf = &self.data[..];
+        let key_len = buf.get_u16();
+        let key = &buf[..key_len as usize];
+        KeyVec::from_vec(key.to_vec())
+    }
+}
+
 impl BlockIterator {
     fn new(block: Arc<Block>) -> Self {
         Self {
+            first_key: block.get_first_key(),
             block,
             key: KeyVec::new(),
             value_range: (0, 0),
             idx: 0,
-            first_key: KeyVec::new(),
         }
     }
 
     /// Creates a block iterator and seek to the first entry.
     pub fn create_and_seek_to_first(block: Arc<Block>) -> Self {
-        unimplemented!()
+        if block.data.is_empty() || block.offsets.is_empty() {
+            return Self::new(block);
+        }
+        let mut iter = Self::new(block);
+        iter.seek_to_first();
+        iter
     }
 
     /// Creates a block iterator and seek to the first key that >= `key`.
     pub fn create_and_seek_to_key(block: Arc<Block>, key: KeySlice) -> Self {
-        unimplemented!()
+        if block.data.is_empty() || block.offsets.is_empty() {
+            return Self::new(block);
+        }
+        let mut iter = Self::new(block);
+        iter.seek_to_key(key);
+        iter
     }
 
     /// Returns the key of the current entry.
-    pub fn key(&self) -> KeySlice {
-        unimplemented!()
+    pub fn key(&self) -> KeySlice<'_> {
+        self.key.as_key_slice()
     }
 
     /// Returns the value of the current entry.
     pub fn value(&self) -> &[u8] {
-        unimplemented!()
+        &self.block.data[self.value_range.0..self.value_range.1]
     }
 
     /// Returns true if the iterator is valid.
     /// Note: You may want to make use of `key`
     pub fn is_valid(&self) -> bool {
-        unimplemented!()
+        !self.key.is_empty()
     }
 
     /// Seeks to the first key in the block.
     pub fn seek_to_first(&mut self) {
-        unimplemented!()
+        if self.block.data.is_empty() || self.block.offsets.is_empty() {
+            self.key.clear();
+            self.value_range = (0, 0);
+            return;
+        }
+        let first_key_offset = self.block.offsets[0] as usize;
+        let mut data_buf = &self.block.data[first_key_offset..];
+        let key_len = data_buf.get_u16() as usize;
+        let key = Bytes::copy_from_slice(&data_buf[..key_len]);
+        self.key = KeyVec::from_vec(key.to_vec());
+        data_buf.advance(key_len);
+        let value_len = data_buf.get_u16() as usize;
+        let value_start = first_key_offset + KEY_VAL_LEN + key_len;
+        self.value_range = (value_start, value_start + value_len);
+        self.idx = 0;
     }
 
     /// Move to the next key in the block.
     pub fn next(&mut self) {
-        unimplemented!()
+        self.idx += 1;
+        if self.idx >= self.block.offsets.len() {
+            self.key.clear();
+            self.value_range = (0, 0);
+            return;
+        }
+        let key_offset = self.block.offsets[self.idx] as usize;
+        let mut data_buf = &self.block.data[key_offset..];
+        let key_len = data_buf.get_u16() as usize;
+        let key = Bytes::copy_from_slice(&data_buf[..key_len]);
+        self.key = KeyVec::from_vec(key.to_vec());
+        data_buf.advance(key_len);
+        let value_len = data_buf.get_u16() as usize;
+        let value_start = key_offset + KEY_VAL_LEN + key_len;
+        self.value_range = (value_start, value_start + value_len);
     }
 
     /// Seek to the first key that >= `key`.
     /// Note: You should assume the key-value pairs in the block are sorted when being added by
     /// callers.
     pub fn seek_to_key(&mut self, key: KeySlice) {
-        unimplemented!()
+        if self.block.data.is_empty() || self.block.offsets.is_empty() {
+            self.key.clear();
+            self.value_range = (0, 0);
+            return;
+        }
+        let (data, offsets) = (&self.block.data, &self.block.offsets);
+        let idx = offsets.partition_point(|offset| {
+            let mut buf = &data[*offset as usize..];
+            let key_len = buf.get_u16() as usize;
+            let key_bytes = &buf[..key_len];
+            KeySlice::from_slice(key_bytes) < key
+        });
+        if idx >= offsets.len() {
+            self.key.clear();
+            self.value_range = (0, 0);
+            return;
+        }
+        let key_offset = offsets[idx] as usize;
+        let mut data_buf = &data[key_offset..];
+        let key_len = data_buf.get_u16() as usize;
+        let key = Bytes::copy_from_slice(&data_buf[..key_len]);
+        self.key = KeyVec::from_vec(key.to_vec());
+        data_buf.advance(key_len);
+        let value_len = data_buf.get_u16() as usize;
+        let value_start = key_offset + KEY_VAL_LEN + key_len;
+        self.value_range = (value_start, value_start + value_len);
+        self.idx = idx;
     }
 }

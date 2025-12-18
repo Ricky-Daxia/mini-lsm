@@ -78,7 +78,7 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
 {
     type KeyType<'a> = KeySlice<'a>;
 
-    fn key(&self) -> KeySlice {
+    fn key(&self) -> KeySlice<'_> {
         match self.current.as_ref() {
             Some(hw) => hw.1.key(),
             None => KeySlice::from_slice(&[]),
@@ -95,7 +95,7 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     fn is_valid(&self) -> bool {
         self.current
             .as_ref()
-            .map_or(false, |inner| inner.1.is_valid())
+            .is_some_and(|inner| inner.1.is_valid())
     }
 
     fn next(&mut self) -> Result<()> {
@@ -123,10 +123,10 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
         current.1.next()?;
 
         if current.1.is_valid() {
-            if let Some(mut inner) = self.iters.peek_mut() {
-                if *current < *inner {
-                    std::mem::swap(&mut *inner, current);
-                }
+            if let Some(mut inner) = self.iters.peek_mut()
+                && *current < *inner
+            {
+                std::mem::swap(&mut *inner, current);
             }
         } else {
             self.current = self.iters.pop();
