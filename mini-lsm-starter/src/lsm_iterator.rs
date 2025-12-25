@@ -75,7 +75,7 @@ impl StorageIterator for LsmIterator {
     type KeyType<'a> = &'a [u8];
 
     fn is_valid(&self) -> bool {
-        self.inner.is_valid()
+        self.is_valid
     }
 
     fn key(&self) -> &[u8] {
@@ -96,6 +96,10 @@ impl StorageIterator for LsmIterator {
         self.next_inner()?;
         self.move_to_non_delete()?;
         Ok(())
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        self.inner.num_active_iterators()
     }
 }
 
@@ -146,5 +150,9 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
                 }
             }
         }
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        self.iter.num_active_iterators()
     }
 }

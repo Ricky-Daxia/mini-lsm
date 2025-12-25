@@ -185,6 +185,13 @@ where
         );
         iter.next().unwrap();
     }
+    if iter.is_valid() {
+        eprintln!(
+            "key left: {:?}, value left: {:?}",
+            as_bytes(iter.key()),
+            as_bytes(iter.value())
+        );
+    }
     assert!(!iter.is_valid());
 }
 
