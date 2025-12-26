@@ -53,8 +53,16 @@ impl BlockBuilder {
         }
         self.offsets.push(self.data.len() as u16);
 
-        self.data.put_u16(key.len() as u16);
-        self.data.put_slice(key.raw_ref());
+        let overlap = compute_overlap(&self.first_key.as_key_slice(), &key);
+        // Encode key overlap
+        self.data.put_u16(overlap as u16);
+        // Encode key length
+        self.data.put_u16((key.len() - overlap) as u16);
+        // Encode key content
+        self.data.put_slice(&key.raw_ref()[overlap..]);
+
+        // self.data.put_u16(key.len() as u16);
+        // self.data.put_slice(key.raw_ref());
 
         self.data.put_u16(value.len() as u16);
         self.data.put_slice(value);
@@ -84,4 +92,18 @@ impl BlockBuilder {
             offsets: self.offsets,
         }
     }
+}
+
+fn compute_overlap(first_key: &KeySlice, key: &KeySlice) -> usize {
+    let mut i = 0;
+    loop {
+        if i >= first_key.len() || i >= key.len() {
+            break;
+        }
+        if first_key.raw_ref()[i] != key.raw_ref()[i] {
+            break;
+        }
+        i += 1;
+    }
+    i
 }

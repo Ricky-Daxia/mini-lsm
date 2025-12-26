@@ -26,7 +26,7 @@ use crate::{
     block::BlockBuilder,
     key::{KeyBytes, KeySlice},
     lsm_storage::BlockCache,
-    table::FileObject,
+    table::{FileObject, bloom::Bloom},
 };
 
 /// Builds an SSTable from key-value pairs.
@@ -37,6 +37,7 @@ pub struct SsTableBuilder {
     data: Vec<u8>,
     pub(crate) meta: Vec<BlockMeta>,
     block_size: usize,
+    key_hashs: Vec<u32>,
 }
 
 impl SsTableBuilder {
@@ -49,6 +50,7 @@ impl SsTableBuilder {
             data: Vec::new(),
             meta: Vec::new(),
             block_size,
+            key_hashs: Vec::new(),
         }
     }
 
@@ -81,6 +83,7 @@ impl SsTableBuilder {
             }
             self.last_key.clear();
             self.last_key.extend_from_slice(key.raw_ref());
+            self.key_hashs.push(farmhash::fingerprint32(key.raw_ref()));
             return;
         }
         let _ = self.builder.add(key, value);
@@ -89,6 +92,7 @@ impl SsTableBuilder {
         }
         self.last_key.clear();
         self.last_key.extend_from_slice(key.raw_ref());
+        self.key_hashs.push(farmhash::fingerprint32(key.raw_ref()));
     }
 
     /// Get the estimated size of the SSTable.
@@ -113,6 +117,13 @@ impl SsTableBuilder {
         let meta_offset = buf.len();
         BlockMeta::encode_block_meta(&self.meta, &mut buf);
         buf.put_u32(meta_offset as u32);
+        let bloom = Bloom::build_from_key_hashes(
+            &self.key_hashs,
+            Bloom::bloom_bits_per_key(self.key_hashs.len(), 0.01),
+        );
+        let bloom_offset = buf.len();
+        bloom.encode(&mut buf);
+        buf.put_u32(bloom_offset as u32);
         let file_object = FileObject::create(path.as_ref(), buf)?;
         Ok(SsTable {
             id,
@@ -122,7 +133,7 @@ impl SsTableBuilder {
             block_meta: self.meta,
             block_meta_offset: meta_offset,
             block_cache,
-            bloom: None,
+            bloom: Some(bloom),
             max_ts: 0,
         })
     }
